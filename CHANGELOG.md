@@ -17,7 +17,7 @@
 
 ### Workspaces and conversations
 
-- Optional member file isolation resolves personal files by member identity with shared-file fallback; existing workspace roles and default sharing still apply (#644).
+- Member file isolation is an opt-in strict sandbox. With `MATECLAW_WORKSPACE_SANDBOX_MEMBER_ISOLATION_ENABLED=true`, authenticated user and workspace identities determine the file root; missing identity denies access without shared-directory fallback. Only six audited builtin file/code tools are available; DSH, MCP/plugin tools, shared skill scripts and unauthenticated channel identities are unavailable. This differs from personal memory-file fallback. (#644).
 - Persistent channel conversations expire stale query context. Uploaded images resolve from conversation storage; directory uploads retain directory metadata and validate containment.
 - Employee drafts accept JSON following reasoning blocks, and explicit tool opt-out is respected even for general capabilities (#648, #655).
 

@@ -318,4 +318,4 @@ curl -X PUT http://localhost:18088/api/v1/workspaces/1/members/42 \
 
 ## Member file isolation (3.0.0)
 
-Personal files can be isolated by member identity with shared-file fallback. This is opt-in and does not change default sharing; workspace roles and tool permissions still apply.
+Member file isolation is an opt-in strict sandbox. With `MATECLAW_WORKSPACE_SANDBOX_MEMBER_ISOLATION_ENABLED=true`, authenticated user and workspace identities determine the file root; missing identity denies access without shared-directory fallback. Only six audited builtin file/code tools are available; DSH, MCP/plugin tools, shared skill scripts and unauthenticated channel identities are unavailable. This differs from personal memory-file fallback.

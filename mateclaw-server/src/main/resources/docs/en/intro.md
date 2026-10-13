@@ -14,7 +14,7 @@ head:
 
 # MateClaw — Self-hosted Multi-Agent AI Operating System
 
-**v2.3.0 (released 2026-09-20) — JSON acceptance and execution evidence for persistent Goals.** Users can configure required JSON fields and bind checks to current requirements and immutable artifact versions. This release also adds controlled worker intervention and skill document/folder uploads, with fixes for DSH history and output budgets, vLLM reasoning, and SSE framing. [v2.3.0](./releases/2.3.0)
+**Previous stable release v2.3.0 (released 2026-09-20) — JSON acceptance and execution evidence for persistent Goals.** Users can configure required JSON fields and bind checks to current requirements and immutable artifact versions. This release also adds controlled worker intervention and skill document/folder uploads, with fixes for DSH history and output budgets, vLLM reasoning, and SSE framing. [v2.3.0](./releases/2.3.0)
 
 **Your multi-agent AI. On your hardware. Under your rules.**
 
