@@ -320,3 +320,7 @@ curl -X PUT http://localhost:18088/api/v1/workspaces/1/members/42 \
 - [安全与审批](./security)——工作空间隔离和 Tool Guard、File Guard 的交互
 - [LLM Wiki](./wiki)——工作空间 scope 的知识库
 - [记忆系统](./memory)——工作空间记忆文件
+
+## 成员文件隔离（3.0.0）
+
+可按成员身份隔离个人文件，保留共享文件回退。此能力是可选配置，不改变默认共享模式；个人文件访问仍受工作空间角色与工具权限控制。

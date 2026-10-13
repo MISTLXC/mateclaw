@@ -315,3 +315,7 @@ curl -X PUT http://localhost:18088/api/v1/workspaces/1/members/42 \
 - [Security & Approval](./security) — how workspace isolation interacts with Tool Guard and File Guard
 - [LLM Wiki](./wiki) — workspace-scoped knowledge bases
 - [Memory](./memory) — workspace memory files
+
+## Member file isolation (3.0.0)
+
+Personal files can be isolated by member identity with shared-file fallback. This is opt-in and does not change default sharing; workspace roles and tool permissions still apply.
