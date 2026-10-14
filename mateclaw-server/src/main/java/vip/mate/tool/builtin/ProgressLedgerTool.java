@@ -74,26 +74,28 @@ public class ProgressLedgerTool {
         }
         try {
             ProgressLedger updated = service.upsert(conversationId, stepKey, label, parsed, note);
-            // Return the freshly-rendered snapshot in the tool result so the
-            // model immediately sees its own update reflected in the
-            // canonical view it will be reading next iteration. Without this
-            // positive-feedback loop the model treats progress_update as a
-            // fire-and-forget side effect and stops calling it after the
-            // first few transitions (observed: round-4 dropped to 3 calls in
-            // 27 minutes of work). The snapshot is also what the runtime
-            // injects pre-LLM-call, so echoing it here keeps the two views
-            // identical.
+            // Acknowledge only the updated entry. The complete ledger is injected
+            // before the next reasoning call; echoing it for every transition
+            // made a batch of N updates repeat the same N-entry snapshot N times.
             StringBuilder out = new StringBuilder(256);
-            out.append("✓ Recorded ").append(stepKey).append(" → ").append(parsed.wireValue())
-                    .append(" (").append(updated.size()).append(" entries total).\n\n");
-            String snapshot = updated.renderSnapshot();
-            if (snapshot != null) {
-                out.append(snapshot);
+            out.append("✓ Recorded ").append(preview(stepKey)).append(" → ").append(parsed.wireValue())
+                    .append(" (").append(updated.size()).append(" entries total).");
+            var entry = updated.asMap().get(stepKey);
+            if (entry != null) {
+                out.append(" Updated: ").append(preview(entry.getLabel()));
+                if (entry.getNote() != null && !entry.getNote().isBlank()) {
+                    out.append("; ").append(preview(entry.getNote()));
+                }
             }
             return out.toString();
         } catch (Exception e) {
             log.warn("progress_update failed for conv={} key={}: {}", conversationId, stepKey, e.getMessage());
             return "Error: failed to persist progress entry — " + e.getMessage();
         }
+    }
+    private static String preview(String value) {
+        if (value == null) return "";
+        String singleLine = value.replace('\n', ' ').replace('\r', ' ');
+        return singleLine.length() <= 80 ? singleLine : singleLine.substring(0, 80) + "…";
     }
 }

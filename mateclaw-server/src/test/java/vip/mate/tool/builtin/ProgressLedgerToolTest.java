@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,11 +38,13 @@ class ProgressLedgerToolTest {
     }
 
     @Test
-    @DisplayName("Happy path: tool result includes the full rendered snapshot for positive feedback.")
+    @DisplayName("Happy path: bounded acknowledgment retains updated entry without repeating full snapshot.")
     void happyPath() {
         ToolExecutionContext.set("conv-1", "admin");
         ProgressLedgerService service = mock(ProgressLedgerService.class);
         Map<String, ProgressEntry> after = new LinkedHashMap<>();
+        after.put("other", new ProgressEntry("other", "UNRELATED_LONG_ENTRY",
+                ProgressStatus.DONE, "x".repeat(2000), Instant.now()));
         after.put("step_a", new ProgressEntry("step_a", "Step A",
                 ProgressStatus.IN_PROGRESS, "note", Instant.now()));
         when(service.upsert(eq("conv-1"), eq("step_a"), eq("Step A"),
@@ -52,13 +55,25 @@ class ProgressLedgerToolTest {
         String out = tool.progress_update("step_a", "Step A", "in_progress", "starting now", null);
 
         // Header line confirms the write so the model has a clear ack.
-        assertTrue(out.startsWith("✓ Recorded step_a → in_progress (1 entries total)"), out);
+        assertTrue(out.startsWith("✓ Recorded step_a → in_progress (2 entries total)"), out);
         // The rendered snapshot must be appended so the model sees its own
         // update reflected in the same view the runtime injects each turn.
-        assertTrue(out.contains("当前任务进度"), "expected snapshot in tool result: " + out);
+        assertFalse(out.contains("当前任务进度"), "full snapshot is injected separately: " + out);
         assertTrue(out.contains("Step A"), "expected entry label in snapshot: " + out);
-        assertTrue(out.contains("`step_a`"), "expected bracketed key in snapshot: " + out);
+        assertTrue(out.length() < 300, "acknowledgment should stay bounded: " + out);
+        assertFalse(out.contains("UNRELATED_LONG_ENTRY"), out);
         verify(service, times(1)).upsert(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void longDisplayKeyIsBoundedWithoutChangingPersistedKey() {
+        ToolExecutionContext.set("conv-1", "admin");
+        ProgressLedgerService service = mock(ProgressLedgerService.class);
+        String key = "step_" + "x".repeat(3000);
+        when(service.upsert(any(), any(), any(), any(), any())).thenReturn(ProgressLedger.empty());
+        String out = new ProgressLedgerTool(service).progress_update(key, "label", "done", null, null);
+        assertTrue(out.length() < 300, out);
+        verify(service).upsert(eq("conv-1"), eq(key), eq("label"), eq(ProgressStatus.DONE), isNull());
     }
 
     @Test

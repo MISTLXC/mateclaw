@@ -513,7 +513,8 @@ public class AgentGraphBuilder {
         String extensionCatalog = toolDisclosureService.renderExtensionCatalog(
                 toolSet, effectiveMaxInputTokens, autoDemotedTools);
         if (extensionCatalog != null && !extensionCatalog.isBlank()) {
-            enhancedPrompt = enhancedPrompt + extensionCatalog;
+            enhancedPrompt = enhancedPrompt + vip.mate.tool.disclosure.ToolCatalogBudget.fit(
+                    extensionCatalog, prefixBudgetPlan.extensionCatalogTokens());
         }
 
         // 当前仅支持 DashScope 和 OpenAI-compatible，其他协议直接拒绝

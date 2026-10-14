@@ -85,6 +85,19 @@ class ToolDisclosureServiceTest {
         return new DefaultToolDisclosureService(ts, ms, tr, new ToolUsageRecencyTracker());
     }
 
+    static class LedgerTools {
+        @Tool(description = "durable progress tracking")
+        public String progress_update(String stepKey, String status) { return ""; }
+    }
+
+    @Test
+    void budgetKeepsProgressTrackingDiscoverableForLongTasks() {
+        var svc = service(List.of(), List.of());
+        var tools = new LedgerTools();
+        var set = AgentToolSet.fromCallbacks(List.of(tools), List.of(ToolCallbacks.from(tools)));
+        assertFalse(svc.computeAutoDemotions(set, 1).contains("progress_update"));
+    }
+
     @Test
     @DisplayName("skill and progressive bridge meta-tools are always core")
     void metaToolsAlwaysCore() {

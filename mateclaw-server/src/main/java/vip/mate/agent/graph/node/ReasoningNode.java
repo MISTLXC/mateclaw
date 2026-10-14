@@ -935,6 +935,14 @@ public class ReasoningNode implements NodeAction {
             }
         }
 
+        // Execution receipts are authoritative and independent of compacted
+        // conversation history. Inject before streamCall so both live tokens
+        // and the persisted final answer are generated with these facts.
+        String executionFacts = accessor.actionExecutionLedger().renderAnswerFacts();
+        if (!executionFacts.isEmpty()) {
+            nonHistoryPrefix.add(new SystemMessage(executionFacts));
+        }
+
         if (conversationWindowManager != null) {
             // Age-based compaction first: drop the body of tool responses
             // older than the K most recent into a one-line placeholder that
