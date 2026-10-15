@@ -113,10 +113,21 @@ class TaskFinalizationGateTest {
         assertEquals(TaskFinalizationGate.Outcome.REVISE,gate.evaluate(revision,ActionExecutionLedger.empty(),0,false,true).outcome());
     }
 
+    @Test void unfinishedRevisionRoutesToExecutionRatherThanProseOnlyRepair() {
+        var verdict=gate.parse(json("REVISE",false,true,0,"[]")).orElseThrow();
+        assertEquals(TaskFinalizationGate.Outcome.CONTINUE,
+                gate.evaluate(verdict,ActionExecutionLedger.empty(),0,false,true).outcome());
+        for(int attempts:List.of(0,1)) {
+            assertEquals(TaskFinalizationGate.Outcome.INCOMPLETE,
+                    gate.evaluate(verdict,ActionExecutionLedger.empty(),attempts,false,false).outcome());
+        }
+        assertEquals(TaskFinalizationGate.Outcome.INCOMPLETE,
+                gate.evaluate(verdict,ActionExecutionLedger.empty(),2,false,true).outcome());
+    }
     @Test void attemptsAreTotalAndTerminalStateTakesPrecedence() {
         for(String decision:List.of("CONTINUE","REVISE")) {
             var verdict=gate.parse(json(decision,false,true,0,"[]")).orElseThrow();
-            assertEquals(TaskFinalizationGate.Outcome.valueOf(decision),gate.evaluate(verdict,ActionExecutionLedger.empty(),1,false,true).outcome());
+            assertEquals(TaskFinalizationGate.Outcome.CONTINUE,gate.evaluate(verdict,ActionExecutionLedger.empty(),1,false,true).outcome());
             assertEquals(TaskFinalizationGate.Outcome.INCOMPLETE,gate.evaluate(verdict,ActionExecutionLedger.empty(),2,false,true).outcome());
             assertEquals(TaskFinalizationGate.Outcome.INCOMPLETE,gate.evaluate(verdict,ActionExecutionLedger.empty(),0,true,true).outcome());
             assertEquals(TaskFinalizationGate.Outcome.INCOMPLETE,gate.evaluate(verdict,ActionExecutionLedger.empty(),0,false,false).outcome());

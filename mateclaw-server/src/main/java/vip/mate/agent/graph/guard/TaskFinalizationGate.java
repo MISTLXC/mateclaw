@@ -151,7 +151,11 @@ public final class TaskFinalizationGate {
         }
         if (verdict.decision() == Outcome.ACCEPT) return new Result(Outcome.ACCEPT, verdict.reason());
         if (attempts >= MAX_CORRECTIVE_ATTEMPTS || !canContinue) return incomplete("Correction allowance exhausted");
-        return new Result(verdict.decision(), verdict.reason());
+        // Work-state facts take precedence over a model's prose-only repair label.
+        // This still consumes the same bounded correction allowance and never accepts a draft.
+        Outcome next = verdict.decision() == Outcome.REVISE && !verdict.taskComplete() && verdict.remainingWork()
+                ? Outcome.CONTINUE : verdict.decision();
+        return new Result(next, verdict.reason());
     }
 
     private static Result incomplete(String reason) { return new Result(Outcome.INCOMPLETE, reason); }

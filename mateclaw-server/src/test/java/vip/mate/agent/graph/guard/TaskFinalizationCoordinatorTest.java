@@ -26,6 +26,16 @@ class TaskFinalizationCoordinatorTest {
     static String json(String decision,String claims){return "{\"decision\":\""+decision+"\",\"taskComplete\":true,\"remainingWork\":false,\"failedCallCount\":1,\"recoveryClaims\":"+claims+",\"reason\":\"checked\"}";}
     NodeStreamingChatHelper.StreamResult result(String text){return new NodeStreamingChatHelper.StreamResult(text,"checker thinking",null,List.of(),false,7,3,false,null,NodeStreamingChatHelper.ErrorType.NONE,false,2,1,1);}
     TaskFinalizationCoordinator.Review review(int window,int attempts,int used){return coordinator.review(model,"c","Calculate all stages","candidate",ledger,"untrusted progress",window,attempts,10,used,true,new RunState());}
+    @Test void revisionFeedbackRequestsSpecificOffendingClauseAndGroundedReplacement() {
+        when(helper.streamCallSilent(any(),any(),anyString(),anyString())).thenAnswer(call->{
+            String prompt=((Prompt)call.getArgument(1)).getContents();
+            assertTrue(prompt.contains("quote the short offending clause"));
+            assertTrue(prompt.contains("give a concrete grounded replacement"));
+            assertTrue(prompt.contains("at most 256 characters"));
+            return result(json("REVISE","[]"));
+        });
+        assertEquals(TaskFinalizationGate.Outcome.REVISE,review(16000,0,0).result().outcome());
+    }
     @Test void latestAggregateAfterPreviewIsGroundedFromExactRetainedResponse() {
         String output="x".repeat(600)+" totalSquareSum=2094116873200";
         var receipts=ActionExecutionLedger.fromEvents(List.of(GraphEventPublisher.toolComplete("aggregate","execute_code",output,true)));

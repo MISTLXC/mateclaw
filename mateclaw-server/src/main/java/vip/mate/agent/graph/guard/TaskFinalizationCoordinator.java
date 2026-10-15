@@ -46,13 +46,18 @@ public final class TaskFinalizationCoordinator {
         Endorse recovery only for canonical supportedRecoveryCallIds; an empty list means none is established.
         Do not invent numeric results or reconstruct omitted results.
         Unsupported candidate prose requires REVISE with empty recoveryClaims and a specific correction.
-        Unfinished executable objective work requires CONTINUE; do not automatically replay failed calls.
+        Unfinished executable objective work or unsatisfied requested state constraints require CONTINUE, not prose-only REVISE.
+        Explicitly requested pending records are not unfinished executable work; compare them to the original constraints.
+        If a record requested unchanged was modified, request its authorized restoration with CONTINUE; do not merely revise the narrative.
+        Do not automatically replay failed calls.
         An empty recoveryClaims does not excuse unsupported candidate prose. Inspect every prose, table and JSON
         claim independently. If the candidate implies an unsupported retry, parameter-fix success or original-call
         recovery, return REVISE with empty recoveryClaims, even if its task-level recovery flag is valid.
         Return ONLY one JSON object with exactly these six fields. No markdown fences, preamble, trailing text, or extra explanations.
         Decision choices: ACCEPT, REVISE, CONTINUE. Choose exactly one value, never a combined value.
         The reason must be at most 256 characters: one short evidence-based sentence, without per-stage calculations or receipt lists.
+        For REVISE, quote the short offending clause and give a concrete grounded replacement in that same reason.
+        Distinguish a false factual claim from truthful negation or explicitly scoped later successes; do not reject those merely for containing recovery words.
         Valid ACCEPT example (replace values with the actual verified facts):
         {"decision":"ACCEPT","taskComplete":true,"remainingWork":false,
         "failedCallCount":0,"recoveryClaims":[],"reason":"All requested stages and aggregate match canonical outputs."}
