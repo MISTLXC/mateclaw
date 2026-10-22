@@ -26,6 +26,40 @@ class ActionExecutionLedgerTest {
         assertTrue(merged.merge(failure).latestCompleteResult().isEmpty());
         assertThrows(UnsupportedOperationException.class,()->merged.latestCompleteResult().put("forged","body"));
     }
+    @Test void teamProgressPreservesFullReadEvidenceAndSurvivesReceiptSerialization() throws Exception {
+        String body = "HEAD " + "evidence ".repeat(1000) + " TAIL";
+        var read = ActionExecutionLedger.fromEvents(List.of(
+                GraphEventPublisher.toolComplete("read", "read_file", body, true)));
+        var progress = ActionExecutionLedger.fromEvents(List.of(
+                GraphEventPublisher.toolStart("progress", "team_tasks", "{\"action\":\"progress\",\"taskId\":\"5\",\"percent\":100}"),
+                GraphEventPublisher.toolComplete("progress", "team_tasks", "Progress recorded", true)));
+        var merged = read.merge(progress);
+        assertEquals(java.util.Map.of("read", body), merged.latestCompleteResult());
+        assertFalse(merged.receipts().get("progress").substantive());
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var restored = mapper.readValue(mapper.writeValueAsString(merged.receipts().get("progress")),
+                ActionExecutionLedger.Receipt.class);
+        assertFalse(restored.substantive());
+        var failed = ActionExecutionLedger.fromEvents(List.of(
+                GraphEventPublisher.toolStart("failed-progress", "team_tasks", "{\"action\":\"progress\",\"taskId\":\"5\"}"),
+                GraphEventPublisher.toolComplete("failed-progress", "team_tasks", "Error", false)));
+        assertEquals(1, merged.merge(failed).failedCallCount());
+    }
+
+    @Test void ambiguousOrMutatingTeamCallsRemainSubstantive() {
+        for (String arguments : List.of("{\"action\":\"complete\",\"taskId\":\"5\"}",
+                "{\"action\":\"output\",\"taskId\":\"5\"}",
+                "{\"action\":\"progress\",\"action\":\"complete\"}", "not-json")) {
+            var ledger = ActionExecutionLedger.fromEvents(List.of(
+                    GraphEventPublisher.toolStart("call", "team_tasks", arguments),
+                    GraphEventPublisher.toolComplete("call", "team_tasks", "receipt", true)));
+            assertTrue(ledger.receipts().get("call").substantive());
+        }
+        var missingStart = ActionExecutionLedger.fromEvents(List.of(
+                GraphEventPublisher.toolComplete("legacy", "team_tasks", "Progress recorded", true)));
+        assertTrue(missingStart.receipts().get("legacy").substantive());
+    }
+
     @Test void legacyReceiptLengthIsUnknownAndCannotGroundLatestOutput() throws Exception {
         var receipt=new ActionExecutionLedger.Receipt("legacy","calc",ActionExecutionLedger.Status.SUCCEEDED,"x".repeat(512)+"...",1);
         assertEquals(-1,receipt.resultChars());

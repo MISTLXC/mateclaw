@@ -30,13 +30,18 @@ public final class ActionExecutionLedger {
     public enum Status { SUCCEEDED, FAILED }
 
     public record Receipt(String toolCallId, String toolName, Status status,
-                          String resultSummary, long completedAt, String operationIdentity, int resultChars) {
+                          String resultSummary, long completedAt, String operationIdentity, int resultChars, boolean progressOnly) {
         public Receipt {
             // Older serialized receipts have no original output length (primitive defaults to zero).
             if (resultSummary != null && !resultSummary.isEmpty() && resultChars == 0) resultChars = -1;
             if (operationIdentity == null || !operationIdentity.matches("sha256:[a-f0-9]{64}")) {
                 operationIdentity = UNKNOWN_OPERATION;
             }
+        }
+
+        public Receipt(String toolCallId, String toolName, Status status,
+                       String resultSummary, long completedAt, String operationIdentity, int resultChars) {
+            this(toolCallId, toolName, status, resultSummary, completedAt, operationIdentity, resultChars, false);
         }
 
         public Receipt(String toolCallId, String toolName, Status status,
@@ -51,7 +56,7 @@ public final class ActionExecutionLedger {
             this(toolCallId, toolName, status, resultSummary, completedAt, UNKNOWN_OPERATION);
         }
         public boolean substantive() {
-            return toolName != null && !NON_SUBSTANTIVE_TOOLS.contains(toolName);
+            return !progressOnly && toolName != null && !NON_SUBSTANTIVE_TOOLS.contains(toolName);
         }
     }
 
@@ -92,6 +97,7 @@ public final class ActionExecutionLedger {
         // which request completed. Conflicting duplicate starts stay unknown.
         Map<String, String> operations = new LinkedHashMap<>();
         Map<String, String> operationTools = new LinkedHashMap<>();
+        Map<String, Boolean> progressCalls = new LinkedHashMap<>();
         for (GraphEventPublisher.GraphEvent event : events) {
             if (event == null || !GraphEventPublisher.EVENT_TOOL_START.equals(event.type())) continue;
             String id = String.valueOf(event.data().getOrDefault("toolCallId", ""));
@@ -99,6 +105,8 @@ public final class ActionExecutionLedger {
             String name = String.valueOf(event.data().getOrDefault("toolName", ""));
             String identity = operationIdentity(name,
                     String.valueOf(event.data().getOrDefault("arguments", "")));
+            progressCalls.put(id, isTeamProgress(name,
+                    String.valueOf(event.data().getOrDefault("arguments", ""))));
             operationTools.put(id, name);
             operations.merge(id, identity, (first, next) -> first.equals(next) ? first : UNKNOWN_OPERATION);
         }
@@ -119,9 +127,24 @@ public final class ActionExecutionLedger {
             receipts.put(id, new Receipt(id, name,
                     success ? Status.SUCCEEDED : Status.FAILED, result, event.timestamp(),
                     name.equals(operationTools.get(id))
-                            ? operations.getOrDefault(id, UNKNOWN_OPERATION) : UNKNOWN_OPERATION, resultChars));
+                            ? operations.getOrDefault(id, UNKNOWN_OPERATION) : UNKNOWN_OPERATION, resultChars,
+                    name.equals(operationTools.get(id))
+                            && !UNKNOWN_OPERATION.equals(operations.getOrDefault(id, UNKNOWN_OPERATION))
+                            && Boolean.TRUE.equals(progressCalls.get(id))));
         }
         return receipts.isEmpty() ? empty() : new ActionExecutionLedger(receipts, fullResults);
+    }
+
+    /** Progress changes metadata, not the substantive result used to verify the answer. */
+    private static boolean isTeamProgress(String toolName, String arguments) {
+        if (!"team_tasks".equals(toolName)) return false;
+        try {
+            var request = OPERATION_MAPPER.readTree(arguments);
+            return request != null && request.isObject()
+                    && "progress".equals(request.path("action").asText());
+        } catch (java.io.IOException invalid) {
+            return false;
+        }
     }
 
     /**

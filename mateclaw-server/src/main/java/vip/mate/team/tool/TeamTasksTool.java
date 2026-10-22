@@ -24,15 +24,18 @@ import vip.mate.team.service.TeamEventChannel;
 import vip.mate.team.service.TeamService;
 import vip.mate.team.service.TeamRunService;
 import vip.mate.team.service.TeamTaskService;
+import vip.mate.team.service.TeamWorkerConversationGovernanceService;
 import vip.mate.tool.builtin.ToolExecutionContext;
 import vip.mate.workspace.conversation.ConversationService;
 import vip.mate.workspace.conversation.model.ConversationEntity;
+import vip.mate.workspace.conversation.model.MessageEntity;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -65,6 +68,7 @@ public class TeamTasksTool {
 
     @Tool(description = "Operate your team's shared task board. Actions: "
             + "'list' all tasks; 'get' one task with comments (taskId); "
+            + "'output' reads the complete latest saved worker reply (taskId), useful when a result summary was shortened; "
             + "'start_run' (lead only; objective required, optional title) returns a runId; "
             + "'create' stages a task (lead only; runId, subject, description, assigneeAgentId required, "
             + "optional blockedBy comma-separated prerequisite task ids, priority, higher first, "
@@ -79,9 +83,9 @@ public class TeamTasksTool {
             + "'retry' a failed/stale task back to pending (lead only; taskId). "
             + "Only usable when you belong to an agent team.")
     public String team_tasks(
-            @ToolParam(description = "One of: start_run, create, seal_run, list, get, complete, progress, comment, attach, cancel, retry")
+            @ToolParam(description = "One of: start_run, create, seal_run, list, get, output, complete, progress, comment, attach, cancel, retry")
             String action,
-            @ToolParam(description = "Task id (string form is fine) — required by get/complete/progress/comment/attach/cancel/retry", required = false)
+            @ToolParam(description = "Task id (string form is fine) — required by get/output/complete/progress/comment/attach/cancel/retry", required = false)
             String taskId,
             @ToolParam(description = "create/seal_run: explicit team run id", required = false)
             String runId,
@@ -101,7 +105,7 @@ public class TeamTasksTool {
             Integer priority,
             @ToolParam(description = "create: true to require human approval before the finished task counts as done", required = false)
             Boolean requireApproval,
-            @ToolParam(description = "complete: result summary reported back to the lead", required = false)
+            @ToolParam(description = "complete: result summary reported back to the lead (maximum 8000 characters; put full content in the final reply or attach a deliverable)", required = false)
             String result,
             @ToolParam(description = "progress: completion percent 0-100", required = false)
             Integer percent,
@@ -143,6 +147,7 @@ public class TeamTasksTool {
                         conversationId, title, objective, ctx);
                 case "list" -> renderBoard(team);
                 case "get" -> renderDetail(team, parseId(taskId, "taskId"));
+                case "output" -> renderOutput(team, workspaceId, parseId(taskId, "taskId"));
                 case "create" -> createTask(team, agentId, isLead, workspaceId, runId,
                         subject, description, assigneeAgentId, blockedBy, priority,
                         requireApproval, conversationId);
@@ -154,7 +159,7 @@ public class TeamTasksTool {
                 case "cancel" -> cancel(team, agentId, isLead, parseId(taskId, "taskId"), text);
                 case "retry" -> retry(team, agentId, isLead, parseId(taskId, "taskId"));
                 default -> "Error: unknown action '" + action
-                        + "'. Use one of: start_run, create, seal_run, list, get, complete, progress, "
+                        + "'. Use one of: start_run, create, seal_run, list, get, output, complete, progress, "
                         + "comment, attach, cancel, retry.";
             };
         } catch (IllegalArgumentException | IllegalStateException e) {
@@ -368,6 +373,47 @@ public class TeamTasksTool {
         return sb.toString();
     }
 
+    private String renderOutput(AgentTeamEntity team, Long workspaceId, Long taskId) {
+        TeamTaskEntity task = requireTaskInTeam(team, taskId);
+        if (!Objects.equals(workspaceId, team.getWorkspaceId())) {
+            throw new IllegalArgumentException("team output is outside the calling workspace");
+        }
+        String header = "Worker output: taskId=" + taskId + ", status=" + task.getStatus() + "\n";
+        if (task.getConversationId() == null || task.getConversationId().isBlank()) {
+            return unavailableOutput(header, task);
+        }
+        if (task.getRunId() == null) {
+            throw new IllegalArgumentException("worker output has no canonical team run");
+        }
+        TeamRunEntity run = runService.requireRun(task.getRunId(), workspaceId);
+        ConversationEntity worker = conversationService.findByConversationId(task.getConversationId());
+        if (run == null || !Objects.equals(run.getTeamId(), team.getId())
+                || !Objects.equals(run.getLeadConversationId(), task.getLeadConversationId())
+                || !ConversationService.isTeamWorkerConversation(worker)
+                || !Objects.equals(worker.getWorkspaceId(), workspaceId)
+                || !Objects.equals(worker.getAgentId(), task.getAssigneeAgentId())
+                || !TeamWorkerConversationGovernanceService.matchesParent(worker, run.getLeadConversationId())) {
+            throw new IllegalArgumentException("worker output linkage does not match this team's run");
+        }
+        // Read only the last saved turn, never an earlier attempt or a reply
+        // preceding a new feedback/approval message that has not finished yet.
+        List<MessageEntity> recent = conversationService.listRecentMessages(task.getConversationId(), 1);
+        if (recent.isEmpty()) {
+            return unavailableOutput(header, task);
+        }
+        MessageEntity message = recent.getLast();
+        if (!"assistant".equals(message.getRole()) || message.getContent() == null
+                || message.getContent().isBlank()) {
+            return unavailableOutput(header, task);
+        }
+        return header + "Latest saved worker reply (verbatim):\n" + message.getContent();
+    }
+
+    private static String unavailableOutput(String header, TeamTaskEntity task) {
+        return header + "Full worker output unavailable; stored task summary only:\n"
+                + (task.getResult() == null ? "(no result)" : task.getResult());
+    }
+
     private String renderDetail(AgentTeamEntity team, Long taskId) {
         TeamTaskEntity task = requireTaskInTeam(team, taskId);
         StringBuilder sb = new StringBuilder(512);
@@ -379,6 +425,10 @@ public class TeamTasksTool {
         if (task.getDescription() != null && !task.getDescription().isBlank()) {
             sb.append("Description: ").append(task.getDescription()).append('\n');
         }
+        List<Long> dependencies = TeamTaskService.parseIdArray(task.getBlockedBy());
+        if (!dependencies.isEmpty()) {
+            sb.append("Dependencies (task ids): ").append(dependencies).append('\n');
+        }
         if (task.getProgressStep() != null) {
             sb.append("Progress: ").append(task.getProgressPercent() == null ? "?"
                     : task.getProgressPercent()).append("% — ").append(task.getProgressStep()).append('\n');
@@ -388,6 +438,13 @@ public class TeamTasksTool {
         }
         if (task.getReason() != null && !task.getReason().isBlank()) {
             sb.append("Reason: ").append(task.getReason()).append('\n');
+        }
+        List<TeamTaskService.Deliverable> deliverables = taskService.listDeliverables(task);
+        if (!deliverables.isEmpty()) {
+            sb.append("Deliverables:\n");
+            for (TeamTaskService.Deliverable deliverable : deliverables) {
+                sb.append("- ").append(deliverable.name()).append(" → ").append(deliverable.url()).append('\n');
+            }
         }
         List<TeamTaskCommentEntity> comments = taskService.listComments(taskId);
         if (!comments.isEmpty()) {
