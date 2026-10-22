@@ -113,6 +113,43 @@ class TeamTasksToolTest {
                 null, null, null, null, null, null, null, null, null, null, null);
     }
 
+    @Test void methodCallbackEncodedProgressIsGroundedInActualSuccessfulWrite() throws Exception {
+        callerIs(MEMBER_ID);
+        when(taskService.getTask(5L)).thenReturn(task(5L, TeamTaskStatus.IN_PROGRESS));
+        when(taskService.updateProgress(eq(5L), eq(MEMBER_ID), eq(100), anyString())).thenReturn(true);
+        var capture = new vip.mate.tool.mcp.runtime.McpToolResultCapture();
+        var ctx = capture.attach(new ToolContext(java.util.Map.of()));
+        String args = "{\"action\":\"progress\",\"taskId\":\"5\",\"percent\":100,\"step\":\"done\"}";
+        var callback = org.springframework.ai.support.ToolCallbacks.from(tool)[0];
+        String result = callback.call(args, ctx);
+        assertFalse(capture.isError());
+        var ledger = vip.mate.agent.graph.state.ActionExecutionLedger.fromEvents(List.of(
+                vip.mate.agent.GraphEventPublisher.toolStart("p", "team_tasks", args),
+                vip.mate.agent.GraphEventPublisher.toolComplete("p", "team_tasks", result, !capture.isError())));
+        var facts = new com.fasterxml.jackson.databind.ObjectMapper().readTree(ledger.projectAnswerFacts(3000).text());
+        assertEquals(1, facts.path("successfulProgressUpdates").size());
+        assertEquals(100, facts.path("successfulProgressUpdates").get(0).path("percent").asInt());
+        verify(taskService).updateProgress(5L, MEMBER_ID, 100, "done");
+    }
+
+    @Test void rejectedNativeProgressCannotEstablishSuccessfulMilestone() throws Exception {
+        callerIs(MEMBER_ID);
+        when(taskService.getTask(5L)).thenReturn(task(5L, TeamTaskStatus.IN_PROGRESS));
+        when(taskService.updateProgress(eq(5L), eq(MEMBER_ID), eq(100), anyString())).thenReturn(false);
+        var capture = new vip.mate.tool.mcp.runtime.McpToolResultCapture();
+        var ctx = capture.attach(new ToolContext(java.util.Map.of()));
+        String result = tool.team_tasks("progress", "5", null, null, null, null, null, null,
+                null, null, null, null, 100, "done", null, null, null, null, ctx);
+        assertTrue(capture.isError());
+        var ledger = vip.mate.agent.graph.state.ActionExecutionLedger.fromEvents(List.of(
+                vip.mate.agent.GraphEventPublisher.toolStart("p", "team_tasks", "{\"action\":\"progress\",\"taskId\":\"5\",\"percent\":100}"),
+                vip.mate.agent.GraphEventPublisher.toolComplete("p", "team_tasks", result, !capture.isError())));
+        assertEquals(1, ledger.failedCallCount());
+        var facts = new com.fasterxml.jackson.databind.ObjectMapper().readTree(ledger.projectAnswerFacts(3000).text());
+        assertTrue(facts.path("successfulProgressUpdates").isEmpty());
+        verify(eventChannel, never()).publishTaskEvent(any(), eq("team_task_progress"), any());
+    }
+
     private TeamRunEntity run(Long teamId, String conversationId, String status) {
         TeamRunEntity run = new TeamRunEntity();
         run.setId(RUN_ID);

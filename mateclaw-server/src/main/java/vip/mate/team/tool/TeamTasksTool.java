@@ -123,20 +123,20 @@ public class TeamTasksTool {
 
         String conversationId = ToolExecutionContext.conversationId(ctx);
         if (conversationId == null || conversationId.isBlank()) {
-            return "Error: no conversation context bound to this call.";
+            return failure(ctx, "Error: no conversation context bound to this call.");
         }
         ConversationEntity conversation = conversationService.findByConversationId(conversationId);
         if (conversation == null || conversation.getAgentId() == null) {
-            return "Error: cannot resolve the calling agent for this conversation.";
+            return failure(ctx, "Error: cannot resolve the calling agent for this conversation.");
         }
         if (conversation.getWorkspaceId() == null) {
-            return "Error: workspaceId is missing from conversation context.";
+            return failure(ctx, "Error: workspaceId is missing from conversation context.");
         }
         Long agentId = conversation.getAgentId();
         Long workspaceId = conversation.getWorkspaceId();
         Optional<AgentTeamEntity> teamOpt = teamService.getTeamForAgent(agentId);
         if (teamOpt.isEmpty()) {
-            return "Error: you are not part of any agent team; team_tasks is unavailable.";
+            return failure(ctx, "Error: you are not part of any agent team; team_tasks is unavailable.");
         }
         AgentTeamEntity team = teamOpt.get();
         boolean isLead = teamService.isLead(team, agentId);
@@ -153,7 +153,7 @@ public class TeamTasksTool {
                         requireApproval, conversationId);
                 case "seal_run" -> sealRun(team, isLead, workspaceId, conversationId, runId);
                 case "complete" -> completeTask(team, agentId, parseId(taskId, "taskId"), result);
-                case "progress" -> progress(team, agentId, parseId(taskId, "taskId"), percent, step);
+                case "progress" -> progress(team, agentId, parseId(taskId, "taskId"), percent, step, ctx);
                 case "comment" -> comment(team, agentId, parseId(taskId, "taskId"), type, text);
                 case "attach" -> attach(team, agentId, parseId(taskId, "taskId"), name, url);
                 case "cancel" -> cancel(team, agentId, isLead, parseId(taskId, "taskId"), text);
@@ -165,13 +165,13 @@ public class TeamTasksTool {
         } catch (IllegalArgumentException | IllegalStateException e) {
             DecisionRecordingException recording = DecisionRecordingException.find(e);
             if (recording != null) throw recording;
-            return "Error: " + e.getMessage();
+            return failure(ctx, "Error: " + e.getMessage());
         } catch (Exception e) {
             DecisionRecordingException recording = DecisionRecordingException.find(e);
             if (recording != null) throw recording;
             log.warn("team_tasks {} failed for team={} agent={}: {}",
                     action, team.getId(), agentId, e.getMessage());
-            return "Error: team_tasks failed — " + e.getMessage();
+            return failure(ctx, "Error: team_tasks failed — " + e.getMessage());
         }
     }
 
@@ -275,11 +275,17 @@ public class TeamTasksTool {
         return sb.toString();
     }
 
+    private static String failure(ToolContext ctx, String message) {
+        var capture = vip.mate.tool.mcp.runtime.McpToolResultCapture.from(ctx);
+        if (capture != null) capture.recordFailure(message);
+        return message;
+    }
+
     private String progress(AgentTeamEntity team, Long agentId, Long taskId,
-                            Integer percent, String step) {
+                            Integer percent, String step, ToolContext ctx) {
         requireTaskInTeam(team, taskId);
         if (percent != null && (percent < 0 || percent > 100)) {
-            return "Error: percent must be between 0 and 100.";
+            return failure(ctx, "Error: percent must be between 0 and 100.");
         }
         boolean ok = taskService.updateProgress(taskId, agentId, percent, step);
         if (ok) {
@@ -293,7 +299,7 @@ public class TeamTasksTool {
             eventChannel.publishTaskEvent(taskService.getTask(taskId), "team_task_progress", extra);
         }
         return ok ? "✓ Progress recorded."
-                : "Error: task is not in progress under your ownership; progress not recorded.";
+                : failure(ctx, "Error: task is not in progress under your ownership; progress not recorded.");
     }
 
     private String comment(AgentTeamEntity team, Long agentId, Long taskId,

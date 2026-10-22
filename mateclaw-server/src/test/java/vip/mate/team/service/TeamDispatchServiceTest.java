@@ -222,6 +222,37 @@ class TeamDispatchServiceTest {
         verify(taskService, never()).completeTask(any(), any(), anyString());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"incomplete", "error_fallback", "max_iterations_reached", "stopped", "evidence_insufficient", "action_unverified", "action_failed"})
+    void incompleteRuntimeIsNotMisreportedAsInvalidWorkerJson(String finishReason) {
+        var adapter = mock(WorkerDecisionAdapter.class);
+        when(adapter.enabled()).thenReturn(true);
+        var ticket = new DecisionTicket(null, DecisionMode.SHADOW, new DecisionValue.BooleanValue(false));
+        when(adapter.judge(any(), anyString(), anyString())).thenReturn(new WorkerDecisionAdapter.Judgment(ticket, false));
+        service.setDecisionAdapter(adapter);
+        TeamTaskEntity assigned = task(1L, MEMBER_A); assigned.setStatus(TeamTaskStatus.IN_PROGRESS);
+        when(taskService.getTask(1L)).thenReturn(assigned);
+        when(agentService.chatWithUsage(eq(MEMBER_A), anyString(), anyString())).thenReturn(
+            new AgentService.ChatResult("任务尚未完成：文字修正已达上限", 10, 5, "model", "provider", finishReason));
+        service.runTask(TEAM_ID, assigned);
+        verify(adapter).judge(eq(assigned), eq("WORKER_RUNTIME_NOT_COMPLETED"), anyString());
+        verify(taskService).failTask(eq(1L), startsWith("WORKER_RUNTIME_NOT_COMPLETED:"), eq(ticket), any());
+        verify(taskService, never()).completeTask(any(), any(), anyString(), any(), any());
+        verify(adapter, never()).judge(any(), eq("INVALID_RESULT_CONTRACT"), anyString());
+    }
+
+    @Test
+    void validJsonCannotOverrideAnIncompleteRuntimeEvenWhenDecisionEnvelopeIsDisabled() {
+        TeamTaskEntity assigned = task(1L, MEMBER_A); assigned.setStatus(TeamTaskStatus.IN_PROGRESS);
+        when(taskService.getTask(1L)).thenReturn(assigned);
+        when(agentService.chatWithUsage(eq(MEMBER_A), anyString(), anyString())).thenReturn(
+            new AgentService.ChatResult("{\"status\":\"COMPLETED\",\"result\":\"done\",\"evidence\":\"checked\"}",
+                10, 5, "model", "provider", "incomplete"));
+        service.runTask(TEAM_ID, assigned);
+        verify(taskService).failTask(eq(1L), startsWith("WORKER_RUNTIME_NOT_COMPLETED:"));
+        verify(taskService, never()).completeTask(any(), any(), anyString());
+    }
+
     @Test
     void childStreamClosesBeforeLeadReceivesSuccessfulResult() {
         TeamTaskEntity assigned = task(1L, MEMBER_A);

@@ -215,6 +215,7 @@ public class TeamDispatchService {
         WorkerDecisionAdapter.Snapshot snapshot = WorkerDecisionAdapter.Snapshot.capture(task).withConversation(childConvId);
         ScheduledFuture<?> heartbeat = null;
         String reply = null;
+        String finishReason = null;
         Exception runFailure = null;
         try {
             try {
@@ -244,6 +245,7 @@ public class TeamDispatchService {
                 AgentService.ChatResult result = agentService.chatWithUsage(
                         memberId, dispatchContent, childConvId);
                 reply = result == null ? null : result.content();
+                finishReason = result == null ? null : result.finishReason();
                 if (reply != null && !reply.isBlank()) {
                     conversationService.saveMessage(childConvId, "assistant", reply);
                 }
@@ -278,7 +280,7 @@ public class TeamDispatchService {
                 if (runFailure != null) {
                     throw runFailure;
                 }
-                settleOutcome(task, reply, snapshot);
+                settleOutcome(task, reply, snapshot, finishReason);
             } catch (Exception error) {
                 settleRunFailure(teamId, task, error);
             }
@@ -335,6 +337,10 @@ public class TeamDispatchService {
     }
 
     void settleOutcome(TeamTaskEntity task, String reply, WorkerDecisionAdapter.Snapshot snapshot) {
+        settleOutcome(task, reply, snapshot, null);
+    }
+
+    void settleOutcome(TeamTaskEntity task, String reply, WorkerDecisionAdapter.Snapshot snapshot, String finishReason) {
         TeamTaskEntity current = taskService.getTask(task.getId());
         if (current == null) {
             return;
@@ -346,6 +352,26 @@ public class TeamDispatchService {
             return;
         }
         if (TeamTaskStatus.IN_PROGRESS.equals(current.getStatus())) {
+            // Runtime diagnostic prose is not a malformed business envelope. Explicit non-completion wins
+            // even if the retained candidate happens to contain a valid COMPLETED object.
+            if (finishReason != null && !finishReason.isBlank()
+                    && !Set.of("normal", "summarized", "return_direct").contains(finishReason)) {
+                String reason = "WORKER_RUNTIME_NOT_COMPLETED: finishReason="
+                        + TeamResultExcerpt.label(finishReason, 80);
+                boolean failed;
+                if (decisionAdapter != null && decisionAdapter.enabled()) {
+                    var judgment = decisionAdapter.judge(current, "WORKER_RUNTIME_NOT_COMPLETED", reply);
+                    failed = taskService.failTask(task.getId(), reason, judgment.ticket(), snapshot);
+                } else {
+                    failed = taskService.failTask(task.getId(), reason);
+                }
+                if (failed) {
+                    TeamTaskEntity settled = taskService.getTask(task.getId());
+                    broadcast(settled != null ? settled : task, "team_task_failed", Map.of("reason", reason));
+                    announceService.announceTaskSettled(settled);
+                }
+                return;
+            }
             // Domain guard: a successful model invocation is not a completed business task.
             // OFF retains the legacy text contract; SHADOW records the corrected baseline.
             if (decisionAdapter != null && decisionAdapter.enabled()) {
