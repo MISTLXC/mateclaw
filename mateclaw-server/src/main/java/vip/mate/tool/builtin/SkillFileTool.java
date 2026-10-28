@@ -313,8 +313,8 @@ public class SkillFileTool {
         first to read its instructions, then follow what SKILL.md tells you.
         Calling a skill name as a tool will fail with "Tool not found".
 
-        Returns bounded JSON: matchingTotal, statusCounts, a compact names index, and
-        limited description examples. The names index is independent of the description
+        Returns bounded JSON: matchingTotal, statusCounts, a compact names index with bounded summaries for every name, and
+        optional longer description examples. The names index is independent of the description
         limit, so normal catalogs fit in one response. hasMore/nextOffset identify real
         additional pages; keep the same filters when using nextOffset.
         For a specific skill, keyword matches name and description. An exact known name
@@ -402,6 +402,8 @@ public class SkillFileTool {
         var names = page.putArray("names");
         page.put("hasMore", false);
         page.putNull("nextOffset");
+        var summaries = page.putObject("summaries");
+        page.put("summariesMayBeTruncated", true);
         var examples = page.putArray("examples");
         var usage = page.putObject("usage");
         usage.put("tool", "readSkillFile");
@@ -411,9 +413,12 @@ public class SkillFileTool {
         // Keep room for metadata; pathological names fail explicitly rather than
         // returning a cursor that cannot make progress.
         while (next < skills.size() && next - offset < 200) {
-            names.add(skills.get(next).getName());
+            var indexedSkill = skills.get(next);
+            names.add(indexedSkill.getName());
+            summaries.put(indexedSkill.getName(), catalogPreview(indexedSkill.getDescription(), 32));
             if (page.toString().length() > MAX_OUTPUT_CHARS - 256) {
                 names.remove(names.size() - 1);
+                summaries.remove(indexedSkill.getName());
                 break;
             }
             next++;
@@ -424,6 +429,20 @@ public class SkillFileTool {
         }
         page.put("hasMore", next < skills.size());
         if (next < skills.size()) page.put("nextOffset", next);
+        // Every indexed skill gets a short factual description before any
+        // longer examples consume the remaining budget. Bare names previously
+        // made the model query each unillustrated skill again for an overview.
+        for (int i = offset; i < next; i++) {
+            var skill = skills.get(i);
+            String prior = summaries.path(skill.getName()).asText();
+            String candidate = catalogPreview(skill.getDescription(), 96);
+            int allowance = Math.max(0, MAX_OUTPUT_CHARS - 256 - page.toString().length()) / (next - i);
+            int encodedLimit = mapper.getNodeFactory().textNode(prior).toString().length() + allowance;
+            while (candidate.length() > prior.length()
+                    && mapper.getNodeFactory().textNode(candidate).toString().length() > encodedLimit)
+                candidate = candidate.substring(0, candidate.length() - 1);
+            if (candidate.length() >= prior.length()) summaries.put(skill.getName(), candidate);
+        }
         for (int i = offset; i < next && examples.size() < exampleLimit; i++) {
             var skill = skills.get(i);
             var item = examples.addObject();

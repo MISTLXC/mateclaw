@@ -39,6 +39,8 @@ class SkillFileToolTest {
         assertEquals("skill_catalog",json.path("kind").asText());
         assertEquals(79,json.path("matchingTotal").asInt());
         assertEquals(79,json.path("names").size());
+        assertEquals(79,json.path("summaries").size(),"Every name needs a bounded summary, not just the first examples");
+        for(var name:json.path("names")) assertFalse(json.path("summaries").path(name.asText()).asText().isBlank());
         assertFalse(json.path("hasMore").asBoolean());
         assertTrue(json.path("nextOffset").isNull());
         assertTrue(json.path("examples").size()<=20);
